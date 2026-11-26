@@ -140,6 +140,8 @@ app.post('/api/upload', requirePin, upload.array('files', 500), (req, res) => {
 });
 
 app.use('/media', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true }));
+// Short address for typing into the Downloader app on a TV remote.
+app.get('/apk', (req, res) => res.redirect('/download/layar-bersama-tv.apk'));
 app.get('/tv', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tv.html')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'control.html')));
 app.use(express.static(path.join(__dirname, 'public'))); // revalidated each load, so updates reach the TVs
