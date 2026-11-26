@@ -71,6 +71,9 @@
   .meta .del { color: var(--danger); }
   .empty { color: var(--muted); padding: 20px 0; text-align: center; }
   footer { max-width: 1400px; margin: 0 auto; padding: 0 16px 24px; color: var(--muted); font-size: 13px; }
+  dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text);
+    padding: 18px; width: min(340px, calc(100vw - 32px)); }
+  dialog::backdrop { background: rgba(0,0,0,.55); }
   code { font: 13px ui-monospace, monospace; background: var(--panel); border: 1px solid var(--line);
     padding: 1px 6px; border-radius: 4px; overflow-wrap: anywhere; }
 </style>
@@ -120,6 +123,16 @@
   Di setiap TV, buka browser ke <code id="tvurl"></code> (ganti <code>TV1</code> jadi <code>TV2</code> untuk TV kedua), lalu tekan OK sekali.
 </footer>
 
+<dialog id="pinDlg">
+  <form method="dialog" id="pinForm">
+    <h2 style="color:var(--text);text-transform:none;letter-spacing:0;font-size:17px">Masukkan PIN kontrol</h2>
+    <p id="pinErr" style="color:var(--danger);min-height:1.2em;margin:0 0 8px"></p>
+    <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" aria-label="PIN kontrol"
+      style="font:inherit;font-size:20px;letter-spacing:.2em;padding:8px 10px;width:100%;border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--text)">
+    <div class="row" style="justify-content:flex-end"><button class="primary">Masuk</button></div>
+  </form>
+</dialog>
+
 <script src="/sync.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -137,10 +150,23 @@ const sock = connectSocket({
       el.textContent = m.list.length ? `${m.list.length} TV terhubung: ${m.list.join(', ')}` : 'Belum ada TV terhubung';
       el.classList.toggle('none', !m.list.length);
     } else if (m.t === 'auth' && !m.ok) {
-      const p = prompt(pin ? 'PIN salah. Masukkan PIN kontrol:' : 'Masukkan PIN kontrol:');
-      if (p !== null) { pin = p.trim(); localStorage.setItem('layar-pin', pin); sock.reconnect(); }
+      askPin(pin ? 'PIN salah, coba lagi.' : '');
     }
   },
+});
+
+// PIN dialog (window.prompt is not available in the desktop app).
+function askPin(error) {
+  const dlg = $('pinDlg');
+  $('pinErr').textContent = error;
+  $('pinInput').value = '';
+  if (!dlg.open) dlg.showModal();
+  $('pinInput').focus();
+}
+$('pinForm').addEventListener('submit', () => {
+  pin = $('pinInput').value.trim();
+  localStorage.setItem('layar-pin', pin);
+  sock.reconnect();
 });
 const cmd = (action, extra = {}) => sock.send({ t: 'cmd', action, ...extra });
 
@@ -308,7 +334,8 @@ async function handleFiles(fileList) {
   xhr.onload = () => {
     $('prog').hidden = true;
     $('upmsg').textContent = xhr.status === 200 ? `${files.length} file ditambahkan.`
-      : xhr.status === 401 ? 'PIN salah. Muat ulang halaman lalu masukkan PIN.' : 'Gagal mengunggah (' + xhr.status + ').';
+      : xhr.status === 401 ? 'PIN salah. Masukkan PIN lalu unggah lagi.' : 'Gagal mengunggah (' + xhr.status + ').';
+    if (xhr.status === 401) askPin('PIN salah, coba lagi.');
   };
   xhr.onerror = () => { $('prog').hidden = true; $('upmsg').textContent = 'Gagal mengunggah: koneksi terputus.'; };
   xhr.send(fd);

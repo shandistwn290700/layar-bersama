@@ -42,7 +42,26 @@ CONTROL_PIN=1234 npm start
 
 Kalau dipasang di belakang reverse proxy (Nginx, Traefik, Caddy), pastikan **WebSocket** di path `/ws` diteruskan dan **batas ukuran upload** cukup besar untuk video (misalnya `client_max_body_size 4g;` di Nginx).
 
-## Menyiapkan Google TV
+## App Google TV (APK)
+
+Cara paling mudah untuk TV. App ini membuka halaman TV dalam layar penuh. Suara video langsung aktif tanpa menekan OK, layar tidak mati, dan app bisa terbuka sendiri saat TV menyala.
+
+1. Di TV, pasang app **Downloader** dari Play Store.
+2. Aktifkan izin instal: Settings → System → About → klik *Android TV OS build* 7 kali (Developer mode), lalu Settings → Apps → Security & restrictions → Unknown sources → izinkan **Downloader**.
+3. Di Downloader, buka `https://domain-kamu/download/layar-bersama-tv.apk`, lalu instal.
+4. Buka **Layar Bersama**, isi alamat server dan nama TV (`TV1`, `TV2`), lalu pilih *Simpan & tampilkan*.
+
+Tombol **Kembali** di remote membuka layar pengaturan lagi. Agar app terbuka otomatis setelah TV menyala, tekan *Izinkan buka otomatis* di layar pengaturan.
+
+Kode sumber ada di folder `android/`. Build: `cd android && gradlew assembleRelease`. Kunci tanda tangan rilis (`keystore.properties` + `.jks`) sengaja tidak masuk git. Simpan baik-baik, karena update APK harus ditandatangani dengan kunci yang sama.
+
+## App controller Windows (EXE)
+
+`LayarBersama-Kontrol-1.0.0.exe` adalah app portable (tanpa instalasi) yang membuka halaman kontrol di jendelanya sendiri. Saat pertama dibuka, isi alamat server. Gantinya lewat menu *Layar Bersama → Ganti alamat server*.
+
+Kode sumber ada di folder `desktop/`. Build: `cd desktop && npm install && npm run dist`. Kalau build gagal dengan pesan NSIS *could not open file*, jalankan dari folder dengan jalur pendek (misalnya `C:\lb\desktop`).
+
+## Menyiapkan Google TV lewat browser (tanpa APK)
 
 Google TV tidak punya browser bawaan, jadi pasang satu dulu di **setiap TV**:
 

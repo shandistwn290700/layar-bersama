@@ -1,0 +1,38 @@
+{
+  "name": "layar-bersama-kontrol",
+  "productName": "Layar Bersama Kontrol",
+  "version": "1.0.0",
+  "description": "Controller Layar Bersama untuk Windows",
+  "main": "main.js",
+  "private": true,
+  "author": "Layar Bersama",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "id.layarbersama.kontrol",
+    "productName": "Layar Bersama Kontrol",
+    "files": [
+      "main.js",
+      "preload.js",
+      "settings.html",
+      "build/icon.png"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "portable",
+      "icon": "build/icon.png",
+      "signAndEditExecutable": true
+    },
+    "portable": {
+      "artifactName": "LayarBersama-Kontrol-${version}.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.5.0",
+    "electron-builder": "^26.18.0"
+  }
+}

@@ -33,7 +33,10 @@
 
 <script src="/sync.js"></script>
 <script>
-const NAME = new URLSearchParams(location.search).get('name') || 'TV';
+const params = new URLSearchParams(location.search);
+const NAME = params.get('name') || 'TV';
+// Inside the Android TV app, sound and fullscreen are already allowed, so no button press is needed.
+const APP_MODE = params.get('app') === '1';
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
 let state = null, currentId = null, activeVideo = null, soundOn = false;
@@ -118,8 +121,13 @@ unlock.addEventListener('click', () => {
   unlock.style.display = 'none';
   keepAwake();
 });
-unlock.focus();
-setTimeout(() => { if (!soundOn) unlock.style.opacity = '.35'; }, 20000);
+if (APP_MODE) {
+  soundOn = true;
+  unlock.style.display = 'none';
+} else {
+  unlock.focus();
+  setTimeout(() => { if (!soundOn) unlock.style.opacity = '.35'; }, 20000);
+}
 document.addEventListener('keydown', () => {
   if (!soundOn) { unlock.style.display = ''; unlock.style.opacity = '1'; unlock.focus(); }
 });
