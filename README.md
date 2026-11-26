@@ -19,6 +19,10 @@ docker run -d --name layar-bersama --restart unless-stopped -p 3000:3000 \
 
 Di Coolify, buat aplikasi dari folder atau repo ini (build pack: Dockerfile, port 3000), tambahkan *persistent storage* ke `/data`, lalu set variabel `CONTROL_PIN`.
 
+Kalau domain lewat **Cloudflare Tunnel**, isi domain di Coolify dengan `http://` (bukan `https://`). HTTPS sudah ditangani Cloudflare; memakai `https://` di Coolify membuat redirect berulang.
+
+Untuk memperbarui setelah ada perubahan kode: push ke GitHub, lalu tekan **Redeploy** di Coolify. File yang sudah diunggah tetap aman di storage `/data`.
+
 ### Pilihan B: Node.js langsung
 
 Butuh Node.js 18 atau lebih baru.
