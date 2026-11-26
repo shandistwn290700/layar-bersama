@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layar TV</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none;
+    font-family: system-ui, sans-serif; color: #fff; }
+  #stage { position: fixed; inset: 0; }
+  #stage > * { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
+    opacity: 0; transition: opacity .35s; background: #000; }
+  #stage > .on { opacity: 1; }
+  #blank { position: fixed; inset: 0; background: #000; display: none; z-index: 5; }
+  #msg { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 1.5vh; text-align: center; z-index: 4; }
+  #msgTitle { font-size: 3.2vw; color: #ddd; }
+  #msgSub { font-size: 1.6vw; color: #888; }
+  #status { position: fixed; top: 2vh; right: 2vw; z-index: 9; display: none; font-size: 1.3vw;
+    background: rgba(120, 20, 20, .85); padding: .4em .8em; border-radius: .4em; }
+  #unlock { position: fixed; left: 50%; bottom: 4vh; transform: translateX(-50%); z-index: 8;
+    font: inherit; font-size: 1.5vw; color: #fff; background: rgba(0, 0, 0, .8);
+    border: 2px solid #666; padding: .6em 1.2em; border-radius: .5em; }
+  #unlock:focus { border-color: #fff; outline: none; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="blank"></div>
+<div id="msg"><div id="msgTitle">Menghubungkan…</div><div id="msgSub"></div></div>
+<div id="status">Koneksi ke server terputus, menyambung ulang…</div>
+<button id="unlock" type="button">Tekan OK untuk layar penuh &amp; suara</button>
+
+<script src="/sync.js"></script>
+<script>
+const NAME = new URLSearchParams(location.search).get('name') || 'TV';
+const $ = (id) => document.getElementById(id);
+const stage = $('stage');
+let state = null, currentId = null, activeVideo = null, soundOn = false;
+const preloaded = new Set();
+
+function disposeEl(el) {
+  if (el.tagName === 'VIDEO') { el.pause(); el.removeAttribute('src'); el.load(); }
+  el.remove();
+}
+
+function showItem(item) {
+  // Drop anything still loading from a previous quick switch; silence what is on screen.
+  for (const c of [...stage.children]) {
+    if (!c.classList.contains('on')) disposeEl(c);
+    else if (c.tagName === 'VIDEO') c.pause();
+  }
+  const old = [...stage.children];
+  const reveal = () => {
+    if (!el.isConnected) return;
+    el.classList.add('on');
+    setTimeout(() => old.forEach(disposeEl), 400);
+  };
+  let el;
+  if (item.type === 'video') {
+    el = document.createElement('video');
+    el.playsInline = true;
+    el.preload = 'auto';
+    el.muted = !soundOn;
+    el.addEventListener('loadeddata', () => { syncVideo(el, state); reveal(); }, { once: true });
+    el.addEventListener('error', reveal, { once: true });
+    el.src = item.url;
+    activeVideo = el;
+  } else {
+    el = new Image();
+    el.onload = el.onerror = reveal;
+    el.src = item.url;
+    activeVideo = null;
+  }
+  stage.appendChild(el);
+}
+
+function preloadNext() {
+  const next = state.items[state.index + 1];
+  if (next && next.type === 'image' && !preloaded.has(next.url)) {
+    preloaded.add(next.url);
+    new Image().src = next.url;
+  }
+}
+
+function render() {
+  $('blank').style.display = state.blank ? 'block' : 'none';
+  const item = state.items[state.index];
+  if (!item) {
+    for (const c of [...stage.children]) disposeEl(c);
+    currentId = null; activeVideo = null;
+    $('msgTitle').textContent = NAME + ' siap';
+    $('msgSub').textContent = 'Belum ada konten. Unggah gambar, video, atau PDF dari halaman kontrol.';
+    $('msg').style.display = 'flex';
+    return;
+  }
+  $('msg').style.display = 'none';
+  if (item.id !== currentId) { currentId = item.id; showItem(item); }
+  if (activeVideo) syncVideo(activeVideo, state);
+  preloadNext();
+}
+
+setInterval(() => { if (activeVideo && state) syncVideo(activeVideo, state); }, 250);
+
+connectSocket({
+  hello: () => ({ t: 'hello', role: 'display', name: NAME }),
+  onStatus: (ok) => { $('status').style.display = ok ? 'none' : 'block'; },
+  onMessage: (m) => { if (m.t === 'state') { state = m.state; render(); } },
+});
+
+// One button press is needed before the browser allows sound and fullscreen.
+const unlock = $('unlock');
+unlock.addEventListener('click', () => {
+  soundOn = true;
+  if (activeVideo) activeVideo.muted = false;
+  const de = document.documentElement;
+  (de.requestFullscreen || de.webkitRequestFullscreen || (() => {})).call(de)?.catch?.(() => {});
+  unlock.style.display = 'none';
+  keepAwake();
+});
+unlock.focus();
+setTimeout(() => { if (!soundOn) unlock.style.opacity = '.35'; }, 20000);
+document.addEventListener('keydown', () => {
+  if (!soundOn) { unlock.style.display = ''; unlock.style.opacity = '1'; unlock.focus(); }
+});
+
+// Stop the TV screensaver while showing still images (works on HTTPS).
+let wakeLock = null;
+async function keepAwake() {
+  try { if ('wakeLock' in navigator && !wakeLock) wakeLock = await navigator.wakeLock.request('screen'); wakeLock?.addEventListener('release', () => (wakeLock = null)); } catch {}
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') keepAwake(); });
+keepAwake();
+</script>
+</body>
+</html>

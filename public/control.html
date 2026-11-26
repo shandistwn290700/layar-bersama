@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kontrol Layar</title>
+<style>
+  :root {
+    --bg: #f4f4f1; --panel: #fff; --text: #1c1c1a; --muted: #6b6b66; --line: #dcdcd6;
+    --accent: #1f6f5c; --accent-text: #fff; --danger: #a3302a; --current: #e3f1ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --panel: #1f1f1d; --text: #ecece8; --muted: #9b9b94; --line: #34342f;
+      --accent: #3fa58a; --accent-text: #08130f; --danger: #e0645c; --current: #20352e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between;
+    padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 18px; margin: 0; }
+  #displays { color: var(--muted); font-size: 14px; }
+  #displays.none { color: var(--danger); }
+  #conn { color: var(--danger); font-size: 14px; display: none; }
+  main { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; padding: 16px;
+    max-width: 1400px; margin: 0 auto; }
+  @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
+  .preview { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden;
+    display: flex; align-items: center; justify-content: center; color: #888; }
+  .preview img, .preview video { width: 100%; height: 100%; object-fit: contain; }
+  .preview .blanked { position: absolute; inset: 0; background: rgba(0,0,0,.82); color: #fff; display: none;
+    align-items: center; justify-content: center; font-weight: 600; }
+  .preview.is-blank .blanked { display: flex; }
+  .nav { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; margin-top: 12px; }
+  #counter { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 64px; text-align: center; }
+  button, .btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    padding: 9px 14px; border-radius: 7px; cursor: pointer; min-height: 42px; display: inline-flex;
+    align-items: center; justify-content: center; gap: 6px; }
+  button:hover, .btn:hover { border-color: var(--muted); }
+  button:focus-visible, .btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { opacity: .45; cursor: default; }
+  .primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  .big { min-height: 54px; font-size: 16px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 12px; }
+  .row label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  button[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+  #vctl { display: none; gap: 10px; align-items: center; margin-top: 12px; }
+  #vctl.show { display: flex; }
+  #seek { flex: 1; min-width: 0; accent-color: var(--accent); }
+  #time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .hint { color: var(--muted); font-size: 13px; margin: 12px 0 0; }
+  kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+  .drop { border: 2px dashed var(--line); border-radius: 8px; padding: 14px; display: flex; flex-wrap: wrap;
+    gap: 10px; align-items: center; }
+  .drop.over { border-color: var(--accent); background: var(--current); }
+  #upmsg { color: var(--muted); font-size: 13px; }
+  progress { width: 100%; height: 8px; accent-color: var(--accent); }
+  #list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  #list li { border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--panel); }
+  #list li.current { border-color: var(--accent); background: var(--current); box-shadow: 0 0 0 1px var(--accent); }
+  .thumb { all: unset; display: block; width: 100%; aspect-ratio: 16 / 9; background: #000; cursor: pointer; position: relative; }
+  .thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .thumb img, .thumb video { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+  .badge { position: absolute; left: 6px; top: 6px; background: rgba(0,0,0,.7); color: #fff; font-size: 12px;
+    padding: 1px 6px; border-radius: 4px; }
+  .meta { display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 8px; }
+  .meta span { flex: 1; min-width: 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta button { min-height: 32px; padding: 2px 8px; font-size: 13px; }
+  .meta .del { color: var(--danger); }
+  .empty { color: var(--muted); padding: 20px 0; text-align: center; }
+  footer { max-width: 1400px; margin: 0 auto; padding: 0 16px 24px; color: var(--muted); font-size: 13px; }
+  code { font: 13px ui-monospace, monospace; background: var(--panel); border: 1px solid var(--line);
+    padding: 1px 6px; border-radius: 4px; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kontrol Layar</h1>
+  <span id="conn">Terputus dari server…</span>
+  <span id="displays" class="none">Belum ada TV terhubung</span>
+</header>
+
+<main>
+  <section aria-labelledby="h-now">
+    <h2 id="h-now">Sedang tampil</h2>
+    <div class="preview" id="preview"><span>Belum ada konten</span><div class="blanked">Layar TV dihitamkan</div></div>
+    <div class="nav">
+      <button class="big" id="prev">◀ Sebelumnya</button>
+      <span id="counter">0 / 0</span>
+      <button class="big primary" id="next">Berikutnya ▶</button>
+    </div>
+    <div id="vctl">
+      <button id="playpause" class="primary">Putar</button>
+      <input type="range" id="seek" min="0" max="100" step="0.1" value="0" aria-label="Posisi video">
+      <span id="time">0:00 / 0:00</span>
+    </div>
+    <div class="row">
+      <button id="blank" aria-pressed="false">Hitamkan layar</button>
+      <label><input type="checkbox" id="loop"> Ulangi video terus-menerus</label>
+    </div>
+    <p class="hint">Pintasan: <kbd>→</kbd>/<kbd>Spasi</kbd> berikutnya, <kbd>←</kbd> sebelumnya, <kbd>B</kbd> hitamkan. Clicker presentasi juga bisa dipakai.</p>
+  </section>
+
+  <section aria-labelledby="h-lib">
+    <h2 id="h-lib">Konten</h2>
+    <div class="drop" id="drop">
+      <label class="btn primary">Tambah file
+        <input type="file" id="file" multiple accept="image/*,video/*,application/pdf,.pdf" hidden>
+      </label>
+      <span id="upmsg">Gambar, video (MP4), atau PDF. Bisa juga seret file ke sini.</span>
+      <progress id="prog" max="1" value="0" hidden></progress>
+    </div>
+    <ol id="list"></ol>
+  </section>
+</main>
+
+<footer>
+  Di setiap TV, buka browser ke <code id="tvurl"></code> (ganti <code>TV1</code> jadi <code>TV2</code> untuk TV kedua), lalu tekan OK sekali.
+</footer>
+
+<script src="/sync.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null, listKey = '', previewId = null, previewVideo = null, seeking = false;
+let pin = localStorage.getItem('layar-pin') || '';
+$('tvurl').textContent = location.origin + '/tv?name=TV1';
+
+const sock = connectSocket({
+  hello: () => ({ t: 'hello', role: 'control', pin }),
+  onStatus: (ok) => { $('conn').style.display = ok ? 'none' : 'inline'; },
+  onMessage(m) {
+    if (m.t === 'state') { state = m.state; render(); }
+    else if (m.t === 'displays') {
+      const el = $('displays');
+      el.textContent = m.list.length ? `${m.list.length} TV terhubung: ${m.list.join(', ')}` : 'Belum ada TV terhubung';
+      el.classList.toggle('none', !m.list.length);
+    } else if (m.t === 'auth' && !m.ok) {
+      const p = prompt(pin ? 'PIN salah. Masukkan PIN kontrol:' : 'Masukkan PIN kontrol:');
+      if (p !== null) { pin = p.trim(); localStorage.setItem('layar-pin', pin); sock.reconnect(); }
+    }
+  },
+});
+const cmd = (action, extra = {}) => sock.send({ t: 'cmd', action, ...extra });
+
+const fmt = (s) => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+
+function render() {
+  const n = state.items.length, item = state.items[state.index];
+  $('counter').textContent = n ? `${state.index + 1} / ${n}` : '0 / 0';
+  $('prev').disabled = !n || state.index === 0;
+  $('next').disabled = !n || state.index >= n - 1;
+  $('blank').setAttribute('aria-pressed', String(state.blank));
+  $('blank').textContent = state.blank ? 'Tampilkan lagi' : 'Hitamkan layar';
+  $('loop').checked = state.loop;
+  $('preview').classList.toggle('is-blank', state.blank);
+
+  if ((item && item.id) !== previewId) {
+    previewId = item && item.id;
+    const p = $('preview');
+    p.querySelectorAll('img, video, span').forEach((e) => e.remove());
+    previewVideo = null;
+    if (!item) {
+      p.insertAdjacentHTML('afterbegin', '<span>Belum ada konten</span>');
+    } else if (item.type === 'video') {
+      previewVideo = document.createElement('video');
+      previewVideo.muted = true; previewVideo.playsInline = true; previewVideo.preload = 'auto';
+      previewVideo.src = item.url;
+      p.prepend(previewVideo);
+    } else {
+      const img = new Image(); img.src = item.url; img.alt = item.name; p.prepend(img);
+    }
+  }
+  $('vctl').classList.toggle('show', !!previewVideo);
+  $('playpause').textContent = state.video.playing ? 'Jeda' : 'Putar';
+  renderList();
+}
+
+function renderList() {
+  const key = state.items.map((i) => i.id).join();
+  const list = $('list');
+  if (key !== listKey) {
+    listKey = key;
+    list.innerHTML = '';
+    if (!state.items.length) list.innerHTML = '<li class="empty" style="border:0;grid-column:1/-1">Belum ada file. Tambahkan gambar, video, atau PDF presentasi.</li>';
+    state.items.forEach((it, i) => {
+      const li = document.createElement('li');
+      li.dataset.id = it.id;
+      const thumb = document.createElement('button');
+      thumb.className = 'thumb';
+      thumb.title = 'Tampilkan di TV';
+      const media = it.type === 'video' ? document.createElement('video') : new Image();
+      if (it.type === 'video') { media.src = it.url + '#t=0.5'; media.preload = 'metadata'; media.muted = true; }
+      else { media.src = it.url; media.loading = 'lazy'; media.alt = ''; }
+      const badge = document.createElement('span');
+      badge.className = 'badge';
+      badge.textContent = (i + 1) + (it.type === 'video' ? ' · video' : '');
+      thumb.append(media, badge);
+      thumb.onclick = () => cmd('goto', { index: i });
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const name = document.createElement('span'); name.textContent = it.name; name.title = it.name;
+      const up = document.createElement('button'); up.textContent = '↑'; up.title = 'Geser ke atas'; up.disabled = i === 0;
+      up.onclick = () => cmd('move', { from: i, to: i - 1 });
+      const down = document.createElement('button'); down.textContent = '↓'; down.title = 'Geser ke bawah'; down.disabled = i === state.items.length - 1;
+      down.onclick = () => cmd('move', { from: i, to: i + 1 });
+      const del = document.createElement('button'); del.textContent = '✕'; del.className = 'del'; del.title = 'Hapus';
+      del.onclick = () => { if (confirm(`Hapus "${it.name}"?`)) cmd('delete', { id: it.id }); };
+      meta.append(name, up, down, del);
+      li.append(thumb, meta);
+      list.append(li);
+    });
+  }
+  const cur = state.items[state.index];
+  for (const li of list.children) li.classList.toggle('current', !!cur && li.dataset.id === cur.id);
+}
+
+// Keep the preview video in step with the TVs and update the seek bar.
+setInterval(() => {
+  if (!previewVideo || !state) return;
+  syncVideo(previewVideo, state);
+  const t = videoTarget(previewVideo, state);
+  if (t && !seeking) {
+    const known = t.duration !== Infinity;
+    $('seek').disabled = !known;
+    if (known) { $('seek').max = t.duration; $('seek').value = t.time; }
+    $('time').textContent = known ? `${fmt(t.time)} / ${fmt(t.duration)}` : fmt(t.time);
+  }
+}, 250);
+
+$('prev').onclick = () => cmd('prev');
+$('next').onclick = () => cmd('next');
+$('blank').onclick = () => cmd('blank', { value: !state.blank });
+$('loop').onchange = (e) => cmd('loop', { value: e.target.checked });
+$('playpause').onclick = () => {
+  const t = previewVideo && videoTarget(previewVideo, state);
+  if (state.video.playing) return cmd('pause', t ? { pos: t.time } : {});
+  const atEnd = t && !state.loop && t.time >= t.duration - 0.2;
+  cmd('play', { pos: t ? (atEnd ? 0 : t.time) : 0 });
+};
+$('seek').oninput = () => { seeking = true; $('time').textContent = `${fmt($('seek').value)} / ${fmt($('seek').max)}`; };
+$('seek').onchange = () => { seeking = false; cmd('seek', { pos: Number($('seek').value) }); };
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.closest('input, textarea') || e.ctrlKey || e.metaKey || e.altKey || !state) return;
+  if (['ArrowRight', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); cmd('next'); }
+  else if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); cmd('prev'); }
+  else if (['b', 'B', '.'].includes(e.key)) { e.preventDefault(); cmd('blank', { value: !state.blank }); }
+});
+
+// ---------- Upload (PDF pages are turned into images in the browser) ----------
+const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+function loadScript(src) {
+  return new Promise((ok, fail) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => fail(new Error('Gagal memuat ' + src)); document.head.append(s); });
+}
+async function pdfToImages(file) {
+  if (!window.pdfjsLib) {
+    await loadScript(PDFJS + 'pdf.min.js');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js';
+  }
+  const pdf = await pdfjsLib.getDocument({
+    data: await file.arrayBuffer(),
+    standardFontDataUrl: PDFJS + 'standard_fonts/', // for PDFs that don't embed their fonts
+    cMapUrl: PDFJS + 'cmaps/', cMapPacked: true,
+  }).promise;
+  const base = file.name.replace(/\.pdf$/i, '');
+  const out = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    $('upmsg').textContent = `Mengubah "${base}": halaman ${i} dari ${pdf.numPages}…`;
+    const page = await pdf.getPage(i);
+    const vp1 = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: Math.min(2560 / vp1.width, 1440 / vp1.height) });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(vp.width); canvas.height = Math.round(vp.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
+    out.push(new File([blob], `${base} - hal ${String(i).padStart(3, '0')}.jpg`, { type: 'image/jpeg' }));
+  }
+  return out;
+}
+
+async function handleFiles(fileList) {
+  const files = [];
+  try {
+    for (const f of fileList) {
+      if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) files.push(...await pdfToImages(f));
+      else if (/^(image|video)\//.test(f.type)) files.push(f);
+    }
+  } catch (err) {
+    $('upmsg').textContent = 'Gagal membaca PDF: ' + err.message;
+    return;
+  }
+  if (!files.length) { $('upmsg').textContent = 'Tidak ada file gambar, video, atau PDF yang bisa dipakai.'; return; }
+  const fd = new FormData();
+  files.forEach((f) => fd.append('files', f, f.name));
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/upload');
+  if (pin) xhr.setRequestHeader('x-pin', pin);
+  $('prog').hidden = false;
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    $('prog').value = e.loaded / e.total;
+    $('upmsg').textContent = `Mengunggah ${files.length} file… ${Math.round((e.loaded / e.total) * 100)}%`;
+  };
+  xhr.onload = () => {
+    $('prog').hidden = true;
+    $('upmsg').textContent = xhr.status === 200 ? `${files.length} file ditambahkan.`
+      : xhr.status === 401 ? 'PIN salah. Muat ulang halaman lalu masukkan PIN.' : 'Gagal mengunggah (' + xhr.status + ').';
+  };
+  xhr.onerror = () => { $('prog').hidden = true; $('upmsg').textContent = 'Gagal mengunggah: koneksi terputus.'; };
+  xhr.send(fd);
+}
+
+$('file').onchange = (e) => { handleFiles(e.target.files); e.target.value = ''; };
+const drop = $('drop');
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); handleFiles(e.dataTransfer.files); });
+</script>
+</body>
+</html>

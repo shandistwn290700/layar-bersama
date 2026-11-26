@@ -1,0 +1,18 @@
+{
+  "name": "layar-bersama",
+  "version": "1.0.0",
+  "description": "Tampilkan presentasi, gambar, dan video secara serentak di beberapa TV lewat jaringan",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^2.0.2",
+    "ws": "^8.18.0"
+  }
+}
