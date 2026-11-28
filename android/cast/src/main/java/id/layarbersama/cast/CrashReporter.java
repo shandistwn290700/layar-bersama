@@ -93,6 +93,39 @@ final class CrashReporter {
         if (upload(ctx, text, 20000)) prefs(ctx).edit().putBoolean(SESSION_OPEN, false).apply();
     }
 
+    /** Everything useful for diagnosing the last cast attempt, for showing on screen. */
+    static String diagnostics(Context ctx) {
+        String trail = "(belum ada jejak)";
+        try {
+            File f = new File(ctx.getFilesDir(), TRAIL);
+            if (f.exists()) trail = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8).trim();
+        } catch (Exception ignored) { }
+        return header(ctx, "DIAGNOSTIK") + "Sesi terakhir selesai normal: "
+                + !prefs(ctx).getBoolean(SESSION_OPEN, false) + "\nJejak sesi terakhir:\n" + trail + "\n" + exitSummary(ctx);
+    }
+
+    /** Sends a text to the server and says what happened, so upload problems are visible too. */
+    static String send(Context ctx, String text) {
+        String server = ctx.getSharedPreferences("cast", Context.MODE_PRIVATE).getString("server", "");
+        if (!server.startsWith("http")) server = DEFAULT_SERVER;
+        try {
+            HttpURLConnection c = (HttpURLConnection) new URL(server + "/api/crash").openConnection();
+            c.setConnectTimeout(20000);
+            c.setReadTimeout(20000);
+            c.setDoOutput(true);
+            c.setRequestMethod("POST");
+            c.setRequestProperty("Content-Type", "text/plain; charset=utf-8");
+            try (OutputStream out = c.getOutputStream()) {
+                out.write(text.getBytes(StandardCharsets.UTF_8));
+            }
+            int code = c.getResponseCode();
+            c.disconnect();
+            return code < 300 ? "Terkirim ke server (kode " + code + ")." : "Server menolak (kode " + code + ").";
+        } catch (Exception e) {
+            return "Gagal mengirim: " + e;
+        }
+    }
+
     private static String exitSummary(Context ctx) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return "\n(catatan Android tidak tersedia di versi ini)\n";
         StringBuilder sb = new StringBuilder("\nCatatan Android (3 terakhir):\n");

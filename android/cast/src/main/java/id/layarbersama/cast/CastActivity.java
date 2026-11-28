@@ -123,6 +123,33 @@ public class CastActivity extends Activity {
         note.setPadding(0, dp(16), 0, 0);
         box.addView(note);
 
+        // Diagnostics: the steps of the last cast attempt and why Android ended the app, shown right here
+        // so they can be read from a screenshot even if sending to the server does not work.
+        TextView diagTitle = label("Diagnostik (untuk perbaikan)");
+        diagTitle.setPadding(0, dp(28), 0, dp(4));
+        box.addView(diagTitle);
+        TextView diag = new TextView(this);
+        diag.setText(CrashReporter.diagnostics(this));
+        diag.setTextIsSelectable(true);
+        diag.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        diag.setTypeface(android.graphics.Typeface.MONOSPACE);
+        diag.setTextColor(Color.rgb(170, 170, 165));
+        box.addView(diag);
+        Button sendDiag = new Button(this);
+        sendDiag.setText("Kirim diagnostik ke server");
+        TextView sendResult = new TextView(this);
+        sendDiag.setOnClickListener(v -> {
+            sendDiag.setEnabled(false);
+            sendResult.setText("Mengirim…");
+            String text = CrashReporter.diagnostics(this);
+            new Thread(() -> {
+                String result = CrashReporter.send(this, text);
+                runOnUiThread(() -> { sendResult.setText(result); sendDiag.setEnabled(true); });
+            }).start();
+        });
+        box.addView(sendDiag);
+        box.addView(sendResult);
+
         ScrollView scroll = new ScrollView(this);
         scroll.addView(box);
         setContentView(scroll);
