@@ -58,7 +58,7 @@ public class CastActivity extends Activity {
         box.addView(intro);
 
         box.addView(label("Alamat server"));
-        serverInput = input(prefs.getString("server", "https://"), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        serverInput = input(prefs.getString("server", CrashReporter.DEFAULT_SERVER), InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         serverInput.setHint("https://layar.contoh.com");
         box.addView(serverInput);
 
@@ -88,14 +88,30 @@ public class CastActivity extends Activity {
         if (lastCrash != null) {
             TextView crash = new TextView(this);
             String[] lines = lastCrash.split("\n");
-            StringBuilder head = new StringBuilder("App sempat berhenti mendadak. Laporannya sudah dikirim ke server.\n");
-            for (int i = 0; i < Math.min(lines.length, 6); i++) head.append('\n').append(lines[i]);
+            StringBuilder head = new StringBuilder("App sempat berhenti mendadak. Detailnya:\n");
+            for (int i = 0; i < Math.min(lines.length, 14); i++) head.append('\n').append(lines[i]);
             crash.setText(head.toString());
+            crash.setTextIsSelectable(true);
             crash.setTextColor(Color.rgb(224, 100, 92));
             crash.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
             crash.setPadding(0, dp(16), 0, 0);
-            crash.setOnClickListener(v -> { CrashReporter.clearLastCrash(this); crash.setVisibility(android.view.View.GONE); });
             box.addView(crash);
+
+            Button resend = new Button(this);
+            resend.setText("Kirim laporan ke server");
+            resend.setOnClickListener(v -> {
+                resend.setEnabled(false);
+                resend.setText("Mengirim…");
+                new Thread(() -> {
+                    boolean ok = CrashReporter.resend(this);
+                    runOnUiThread(() -> {
+                        resend.setText(ok ? "Laporan terkirim" : "Gagal mengirim, coba lagi");
+                        resend.setEnabled(!ok);
+                        if (ok) CrashReporter.clearLastCrash(this);
+                    });
+                }).start();
+            });
+            box.addView(resend);
         }
 
         TextView note = new TextView(this);
