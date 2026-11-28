@@ -140,6 +140,19 @@ app.post('/api/upload', requirePin, upload.array('files', 500), (req, res) => {
   res.json({ added: (req.files || []).length });
 });
 
+// Crash reports from the phone cast app, so problems can be diagnosed without a USB cable.
+const CRASH_FILE = path.join(DATA_DIR, 'crash.log');
+app.post('/api/crash', express.text({ limit: '64kb', type: '*/*' }), (req, res) => {
+  const entry = `===== ${new Date().toISOString()} =====\n${String(req.body || '').slice(0, 60000)}\n`;
+  fs.readFile(CRASH_FILE, 'utf8', (err, old) => {
+    const kept = (old || '').split(/(?====== )/).slice(-19).join(''); // keep the 20 most recent reports
+    fs.writeFile(CRASH_FILE, kept + entry, () => res.sendStatus(204));
+  });
+});
+app.get('/api/crash', requirePin, (req, res) => {
+  fs.readFile(CRASH_FILE, 'utf8', (err, text) => res.type('text/plain').send(text || '(belum ada laporan crash)'));
+});
+
 app.use('/media', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true }));
 // Short address for typing into the Downloader app on a TV remote.
 app.get('/apk', (req, res) => res.redirect('/download/layar-bersama-tv.apk'));

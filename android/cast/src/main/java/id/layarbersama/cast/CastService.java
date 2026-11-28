@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -94,18 +95,45 @@ public class CastService extends Service {
     @Override
     public IBinder onBind(Intent intent) { return null; }
 
+    /**
+     * Runs work on the WebRTC thread. Callbacks (WebSocket, screen capture) can still arrive after the
+     * service has shut down; those are dropped instead of crashing the app, and any error is reported.
+     */
+    private void run(Runnable work) {
+        try {
+            exec.execute(() -> {
+                try {
+                    work.run();
+                } catch (Throwable t) {
+                    CrashReporter.report(this, "CastService", t);
+                    setStatus("Terjadi error: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // service already stopped
+        }
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null || ACTION_STOP.equals(intent.getAction())) {
-            exec.execute(() -> shutdown(true));
+            run(() -> shutdown(true));
             return START_NOT_STICKY;
         }
+        if (running) return START_NOT_STICKY; // already casting; ignore a second start
         // Android requires the foreground notification before the screen capture starts.
-        Notification n = buildNotification("Menyiapkan cast…");
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-        } else {
-            startForeground(NOTIFICATION_ID, n);
+        try {
+            Notification n = buildNotification("Menyiapkan cast…");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            } else {
+                startForeground(NOTIFICATION_ID, n);
+            }
+        } catch (RuntimeException e) {
+            CrashReporter.report(this, "startForeground", e);
+            status = "Android menolak memulai cast: " + e.getMessage();
+            stopSelf();
+            return START_NOT_STICKY;
         }
         running = true;
         stopping = false;
@@ -113,11 +141,12 @@ public class CastService extends Service {
         pin = intent.getStringExtra(EXTRA_PIN);
         name = intent.getStringExtra(EXTRA_NAME);
         Intent resultData = intent.getParcelableExtra(EXTRA_RESULT_DATA);
-        exec.execute(() -> {
+        run(() -> {
             try {
                 startCapture(resultData);
                 connect();
-            } catch (RuntimeException e) {
+            } catch (Throwable e) {
+                CrashReporter.report(this, "startCapture", e);
                 setStatus("Gagal memulai cast: " + e.getMessage());
                 shutdown(false);
             }
@@ -142,7 +171,7 @@ public class CastService extends Service {
         capturer = new ScreenCapturerAndroid(resultData, new MediaProjection.Callback() {
             @Override
             public void onStop() { // the user ended sharing from the system UI
-                exec.execute(() -> shutdown(true));
+                run(() -> shutdown(true));
             }
         });
         textureHelper = SurfaceTextureHelper.create("ScreenCapture", egl.getEglBaseContext());
@@ -173,16 +202,16 @@ public class CastService extends Service {
 
             @Override
             public void onMessage(WebSocket socket, String text) {
-                exec.execute(() -> {
+                run(() -> {
                     try { handle(new JSONObject(text)); } catch (JSONException ignored) { }
                 });
             }
 
             @Override
-            public void onClosed(WebSocket socket, int code, String reason) { exec.execute(() -> onDisconnected()); }
+            public void onClosed(WebSocket socket, int code, String reason) { run(() -> onDisconnected()); }
 
             @Override
-            public void onFailure(WebSocket socket, Throwable t, Response response) { exec.execute(() -> onDisconnected()); }
+            public void onFailure(WebSocket socket, Throwable t, Response response) { run(() -> onDisconnected()); }
         });
     }
 
@@ -190,7 +219,7 @@ public class CastService extends Service {
         if (stopping) return;
         closePeers();
         setStatus("Koneksi ke server terputus, menyambung ulang…");
-        main.postDelayed(() -> exec.execute(this::connect), 3000);
+        main.postDelayed(() -> run(this::connect), 3000);
     }
 
     private void handle(JSONObject m) throws JSONException {
@@ -259,7 +288,7 @@ public class CastService extends Service {
         pc.createOffer(new SdpAdapter() {
             @Override
             public void onCreateSuccess(SessionDescription sdp) {
-                exec.execute(() -> {
+                run(() -> {
                     if (peers.get(id) != pc) return;
                     pc.setLocalDescription(new SdpAdapter(), sdp);
                     sendSignal(id, obj("sdp", obj("type", "offer", "sdp", sdp.description)));
@@ -277,7 +306,7 @@ public class CastService extends Service {
             if (!"answer".equals(sdp.optString("type"))) return;
             pc.setRemoteDescription(new SdpAdapter() {
                 @Override
-                public void onSetSuccess() { exec.execute(() -> limitBitrate(pc)); }
+                public void onSetSuccess() { run(() -> limitBitrate(pc)); }
             }, new SessionDescription(SessionDescription.Type.ANSWER, sdp.getString("sdp")));
         } else if (data.has("candidate")) {
             JSONObject c = data.getJSONObject("candidate");
@@ -327,12 +356,12 @@ public class CastService extends Service {
 
         @Override
         public void onIceCandidate(IceCandidate c) {
-            exec.execute(() -> sendSignal(id,
+            run(() -> sendSignal(id,
                     obj("candidate", obj("candidate", c.sdp, "sdpMid", c.sdpMid, "sdpMLineIndex", c.sdpMLineIndex))));
         }
 
         @Override
-        public void onConnectionChange(PeerConnection.PeerConnectionState s) { exec.execute(CastService.this::updateStatus); }
+        public void onConnectionChange(PeerConnection.PeerConnectionState s) { run(CastService.this::updateStatus); }
 
         @Override public void onSignalingChange(PeerConnection.SignalingState s) { }
         @Override public void onIceConnectionChange(PeerConnection.IceConnectionState s) { }
@@ -428,7 +457,7 @@ public class CastService extends Service {
 
     @Override
     public void onDestroy() {
-        exec.execute(() -> { if (running) shutdown(true); });
+        run(() -> { if (running) shutdown(true); });
         exec.shutdown();
         super.onDestroy();
     }

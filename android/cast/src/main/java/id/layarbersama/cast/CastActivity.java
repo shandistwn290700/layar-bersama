@@ -84,6 +84,20 @@ public class CastActivity extends Activity {
         statusView.setPadding(0, dp(16), 0, 0);
         box.addView(statusView);
 
+        String lastCrash = CrashReporter.lastCrash(this);
+        if (lastCrash != null) {
+            TextView crash = new TextView(this);
+            String[] lines = lastCrash.split("\n");
+            StringBuilder head = new StringBuilder("App sempat berhenti mendadak. Laporannya sudah dikirim ke server.\n");
+            for (int i = 0; i < Math.min(lines.length, 6); i++) head.append('\n').append(lines[i]);
+            crash.setText(head.toString());
+            crash.setTextColor(Color.rgb(224, 100, 92));
+            crash.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            crash.setPadding(0, dp(16), 0, 0);
+            crash.setOnClickListener(v -> { CrashReporter.clearLastCrash(this); crash.setVisibility(android.view.View.GONE); });
+            box.addView(crash);
+        }
+
         TextView note = new TextView(this);
         note.setText("Android akan bertanya izin merekam layar setiap kali cast dimulai. "
                 + "Suara HP tidak ikut terkirim. Cast bisa dihentikan dari notifikasi.");
