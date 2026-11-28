@@ -155,8 +155,29 @@ app.get('/api/crash', requirePin, (req, res) => {
 
 app.use('/media', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true }));
 // Short address for typing into the Downloader app on a TV remote.
-app.get('/apk', (req, res) => res.redirect('/download/layar-bersama-tv.apk'));
-app.get('/cast', (req, res) => res.redirect('/download/layar-bersama-cast.apk'));
+// APKs carry their version in the file name (layar-bersama-cast-1.2.apk), so a phone browser can never
+// reuse a cached older download. The short addresses always point to the newest version.
+const DOWNLOAD_DIR = path.join(__dirname, 'public', 'download');
+function latestApk(app) {
+  const re = new RegExp(`^layar-bersama-${app}-(\\d+(?:\\.\\d+)*)\\.apk$`);
+  const versions = fs.readdirSync(DOWNLOAD_DIR).map((f) => f.match(re)).filter(Boolean);
+  const num = (v) => v.split('.').map(Number);
+  versions.sort((a, b) => {
+    const x = num(a[1]), y = num(b[1]);
+    for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0);
+    return 0;
+  });
+  return versions.length ? '/download/' + versions[versions.length - 1][0] : null;
+}
+function redirectToApk(app) {
+  return (req, res) => {
+    const url = latestApk(app);
+    if (!url) return res.sendStatus(404);
+    res.set('Cache-Control', 'no-store').redirect(url);
+  };
+}
+app.get(['/apk', '/download/layar-bersama-tv.apk'], redirectToApk('tv'));
+app.get(['/cast', '/download/layar-bersama-cast.apk'], redirectToApk('cast'));
 app.get('/tv', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tv.html')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'control.html')));
 app.use(express.static(path.join(__dirname, 'public'))); // revalidated each load, so updates reach the TVs

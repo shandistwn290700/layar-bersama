@@ -70,7 +70,9 @@ Menampilkan layar laptop atau HP secara langsung di semua TV. Gambar dikirim lew
 
 Cast paling lancar kalau pengirim dan TV ada di jaringan lokal yang sama. Kalau jaringannya berbeda dan cast tidak tersambung, tambahkan server TURN lewat variabel `TURN_URL`, `TURN_USERNAME`, dan `TURN_CREDENTIAL`.
 
-Kode app HP ada di `android/cast/`. Build: `cd android && gradlew :cast:assembleRelease`.
+Kode app HP ada di `android/cast/`. Build: `cd android && gradlew :cast:assembleRelease` (tambahkan `-Pemulator` untuk ikut memasukkan library x86_64 agar bisa dicoba di emulator PC).
+
+**Merilis APK baru:** naikkan `versionCode`/`versionName`, lalu salin hasil build ke `public/download/` dengan nama berisi versi, misalnya `layar-bersama-cast-1.3.apk` atau `layar-bersama-tv-1.1.apk`. Alamat `/cast` dan `/apk` otomatis mengarah ke versi tertinggi. Karena nama filenya selalu baru, browser HP tidak akan memakai salinan lama dari cache.
 
 ## Menyiapkan Google TV lewat browser (tanpa APK)
 
