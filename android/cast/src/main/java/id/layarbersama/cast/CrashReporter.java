@@ -49,8 +49,63 @@ final class CrashReporter {
                 String last = lastCrash(app);
                 if (last != null) upload(app, last, 20000);
             }
+            reportUnfinishedSession(app);
             reportPastExits(app);
         }).start();
+    }
+
+    // ---------- Trail: the steps of the last cast attempt ----------
+
+    private static final String TRAIL = "trail.txt";
+    private static final String SESSION_OPEN = "session-open";
+
+    /** Records one step. Written straight to disk so it survives even a native crash right after. */
+    static synchronized void step(Context ctx, String what) {
+        try (OutputStream out = new FileOutputStream(new File(ctx.getFilesDir(), TRAIL), true)) {
+            String line = new java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(new java.util.Date())
+                    + " [" + Thread.currentThread().getName() + "] " + what + "\n";
+            out.write(line.getBytes(StandardCharsets.UTF_8));
+        } catch (Exception ignored) { }
+    }
+
+    /** Called when the user starts a cast: begins a fresh trail. */
+    static void beginSession(Context ctx) {
+        new File(ctx.getFilesDir(), TRAIL).delete();
+        prefs(ctx).edit().putBoolean(SESSION_OPEN, true).commit();
+        step(ctx, "sesi cast dimulai");
+    }
+
+    /** Called when a cast ends normally; the trail is then not reported. */
+    static void endSession(Context ctx) {
+        step(ctx, "sesi cast selesai normal");
+        prefs(ctx).edit().putBoolean(SESSION_OPEN, false).commit();
+    }
+
+    /** If the last cast never ended normally, the app was closed in the middle: send its trail. */
+    private static void reportUnfinishedSession(Context ctx) {
+        if (!prefs(ctx).getBoolean(SESSION_OPEN, false)) return;
+        String trail = "";
+        try {
+            trail = new String(Files.readAllBytes(new File(ctx.getFilesDir(), TRAIL).toPath()), StandardCharsets.UTF_8);
+        } catch (Exception ignored) { }
+        String text = header(ctx, "SESI CAST TERAKHIR TIDAK SELESAI (app tertutup di tengah jalan)")
+                + "Jejak langkah:\n" + trail + exitSummary(ctx);
+        if (upload(ctx, text, 20000)) prefs(ctx).edit().putBoolean(SESSION_OPEN, false).apply();
+    }
+
+    private static String exitSummary(Context ctx) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return "\n(catatan Android tidak tersedia di versi ini)\n";
+        StringBuilder sb = new StringBuilder("\nCatatan Android (3 terakhir):\n");
+        try {
+            ActivityManager am = ctx.getSystemService(ActivityManager.class);
+            for (ApplicationExitInfo e : am.getHistoricalProcessExitReasons(ctx.getPackageName(), 0, 3)) {
+                sb.append("- ").append(new java.util.Date(e.getTimestamp())).append(" alasan=").append(reasonName(e.getReason()))
+                        .append(" status=").append(e.getStatus()).append(" ket=").append(e.getDescription()).append('\n');
+            }
+        } catch (Throwable t) {
+            sb.append("(gagal membaca: ").append(t).append(")\n");
+        }
+        return sb.toString();
     }
 
     /** Android 11+ remembers why the app's process ended, including native crashes the Java handler never sees. */
@@ -65,10 +120,8 @@ final class CrashReporter {
                 if (e.getTimestamp() <= checked) continue;
                 newest = Math.max(newest, e.getTimestamp());
                 int r = e.getReason();
-                if (r != ApplicationExitInfo.REASON_CRASH && r != ApplicationExitInfo.REASON_CRASH_NATIVE
-                        && r != ApplicationExitInfo.REASON_ANR && r != ApplicationExitInfo.REASON_INITIALIZATION_FAILURE) {
-                    continue;
-                }
+                // Report every unusual ending; only skip the user closing the app or a clean exit.
+                if (r == ApplicationExitInfo.REASON_USER_REQUESTED || r == ApplicationExitInfo.REASON_EXIT_SELF) continue;
                 String text = header(ctx, "PROSES BERHENTI (dari catatan Android)")
                         + "Waktu: " + new java.util.Date(e.getTimestamp())
                         + "\nAlasan: " + reasonName(r) + " (status " + e.getStatus() + ")"
@@ -87,7 +140,17 @@ final class CrashReporter {
             case ApplicationExitInfo.REASON_CRASH_NATIVE: return "CRASH_NATIVE";
             case ApplicationExitInfo.REASON_ANR: return "ANR (tidak merespons)";
             case ApplicationExitInfo.REASON_INITIALIZATION_FAILURE: return "INITIALIZATION_FAILURE";
-            default: return String.valueOf(r);
+            case ApplicationExitInfo.REASON_SIGNALED: return "SIGNALED (dihentikan sinyal)";
+            case ApplicationExitInfo.REASON_LOW_MEMORY: return "LOW_MEMORY";
+            case ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE: return "EXCESSIVE_RESOURCE_USAGE";
+            case ApplicationExitInfo.REASON_PERMISSION_CHANGE: return "PERMISSION_CHANGE";
+            case ApplicationExitInfo.REASON_DEPENDENCY_DIED: return "DEPENDENCY_DIED";
+            case ApplicationExitInfo.REASON_OTHER: return "OTHER (dihentikan sistem)";
+            case ApplicationExitInfo.REASON_USER_REQUESTED: return "USER_REQUESTED";
+            case ApplicationExitInfo.REASON_USER_STOPPED: return "USER_STOPPED";
+            case ApplicationExitInfo.REASON_EXIT_SELF: return "EXIT_SELF";
+            case ApplicationExitInfo.REASON_FREEZER: return "FREEZER";
+            default: return "kode " + r;
         }
     }
 

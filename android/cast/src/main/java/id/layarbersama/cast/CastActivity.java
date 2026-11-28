@@ -48,7 +48,9 @@ public class CastActivity extends Activity {
         box.setPadding(pad, dp(24), pad, dp(24));
 
         TextView title = new TextView(this);
-        title.setText("Layar Bersama Cast");
+        String version = "";
+        try { version = " " + getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception ignored) { }
+        title.setText("Layar Bersama Cast" + version);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
         box.addView(title);
 
@@ -153,6 +155,8 @@ public class CastActivity extends Activity {
                 .putString("name", name.isEmpty() ? "HP" : name)
                 .apply();
         serverInput.setText(server);
+        CrashReporter.beginSession(this);
+        CrashReporter.step(this, "tombol Mulai cast, membuka dialog izin rekam layar");
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE);
     }
@@ -161,7 +165,9 @@ public class CastActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQ_CAPTURE) return;
+        CrashReporter.step(this, "hasil dialog izin: resultCode=" + resultCode + " data=" + (data != null));
         if (resultCode != RESULT_OK || data == null) {
+            CrashReporter.endSession(this);
             CastService.status = "Izin merekam layar ditolak.";
             render();
             return;
@@ -172,7 +178,17 @@ public class CastActivity extends Activity {
                 .putExtra(CastService.EXTRA_SERVER, prefs.getString("server", ""))
                 .putExtra(CastService.EXTRA_PIN, prefs.getString("pin", ""))
                 .putExtra(CastService.EXTRA_NAME, prefs.getString("name", "HP"));
-        startForegroundService(svc);
+        CrashReporter.step(this, "memanggil startForegroundService");
+        try {
+            startForegroundService(svc);
+        } catch (RuntimeException e) {
+            CrashReporter.step(this, "startForegroundService GAGAL: " + e);
+            CrashReporter.report(this, "startForegroundService", e);
+            CastService.status = "Android menolak memulai cast: " + e.getMessage();
+            render();
+            return;
+        }
+        CrashReporter.step(this, "startForegroundService terkirim");
         CastService.status = "Menyiapkan cast…";
         render();
     }

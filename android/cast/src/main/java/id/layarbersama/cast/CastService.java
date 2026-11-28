@@ -95,6 +95,8 @@ public class CastService extends Service {
     @Override
     public IBinder onBind(Intent intent) { return null; }
 
+    private void step(String what) { CrashReporter.step(this, what); }
+
     /**
      * Runs work on the WebRTC thread. Callbacks (WebSocket, screen capture) can still arrive after the
      * service has shut down; those are dropped instead of crashing the app, and any error is reported.
@@ -120,6 +122,7 @@ public class CastService extends Service {
             run(() -> shutdown(true));
             return START_NOT_STICKY;
         }
+        step("onStartCommand START (running=" + running + ")");
         if (running) return START_NOT_STICKY; // already casting; ignore a second start
         // Android requires the foreground notification before the screen capture starts.
         try {
@@ -129,7 +132,9 @@ public class CastService extends Service {
             } else {
                 startForeground(NOTIFICATION_ID, n);
             }
+            step("startForeground OK");
         } catch (RuntimeException e) {
+            step("startForeground GAGAL: " + e);
             CrashReporter.report(this, "startForeground", e);
             status = "Android menolak memulai cast: " + e.getMessage();
             stopSelf();
@@ -160,20 +165,25 @@ public class CastService extends Service {
         iceServers.clear();
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
 
+        step("PeerConnectionFactory.initialize");
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(this)
                 .createInitializationOptions());
+        step("EglBase.create");
         egl = EglBase.create();
+        step("createPeerConnectionFactory");
         factory = PeerConnectionFactory.builder()
                 .setVideoEncoderFactory(new DefaultVideoEncoderFactory(egl.getEglBaseContext(), true, true))
                 .setVideoDecoderFactory(new DefaultVideoDecoderFactory(egl.getEglBaseContext()))
                 .createPeerConnectionFactory();
 
+        step("ScreenCapturerAndroid dibuat");
         capturer = new ScreenCapturerAndroid(resultData, new MediaProjection.Callback() {
             @Override
             public void onStop() { // the user ended sharing from the system UI
                 run(() -> shutdown(true));
             }
         });
+        step("SurfaceTextureHelper + VideoSource");
         textureHelper = SurfaceTextureHelper.create("ScreenCapture", egl.getEglBaseContext());
         videoSource = factory.createVideoSource(true);
         capturer.initialize(textureHelper, this, videoSource.getCapturerObserver());
@@ -183,7 +193,9 @@ public class CastService extends Service {
         double scale = Math.min(1.0, (double) MAX_SIDE / Math.max(dm.widthPixels, dm.heightPixels));
         int w = ((int) (dm.widthPixels * scale)) & ~1; // encoders want even sizes
         int h = ((int) (dm.heightPixels * scale)) & ~1;
+        step("startCapture " + w + "x" + h + " (layar " + dm.widthPixels + "x" + dm.heightPixels + ")");
         capturer.startCapture(w, h, FPS);
+        step("startCapture OK");
         videoTrack = factory.createVideoTrack("screen0", videoSource);
     }
 
@@ -192,11 +204,13 @@ public class CastService extends Service {
     private void connect() {
         if (stopping) return;
         setStatus("Menghubungkan ke server…");
+        step("connect " + server);
         if (http == null) http = new OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build();
         String url = server.replaceFirst("(?i)^http", "ws") + "/ws";
         ws = http.newWebSocket(new Request.Builder().url(url).build(), new WebSocketListener() {
             @Override
             public void onOpen(WebSocket socket, Response response) {
+                step("WebSocket terbuka");
                 send(obj("t", "hello", "role", "control", "name", name, "pin", pin));
             }
 
@@ -208,10 +222,10 @@ public class CastService extends Service {
             }
 
             @Override
-            public void onClosed(WebSocket socket, int code, String reason) { run(() -> onDisconnected()); }
+            public void onClosed(WebSocket socket, int code, String reason) { step("WebSocket ditutup " + code); run(() -> onDisconnected()); }
 
             @Override
-            public void onFailure(WebSocket socket, Throwable t, Response response) { run(() -> onDisconnected()); }
+            public void onFailure(WebSocket socket, Throwable t, Response response) { step("WebSocket gagal: " + t); run(() -> onDisconnected()); }
         });
     }
 
@@ -228,6 +242,7 @@ public class CastService extends Service {
                 readIceServers(m.optJSONArray("iceServers"));
                 break;
             case "auth":
+                step("auth ok=" + m.optBoolean("ok"));
                 if (m.optBoolean("ok")) {
                     send(obj("t", "cast-start", "name", name));
                     setStatus("Menyambungkan ke TV…");
@@ -237,6 +252,7 @@ public class CastService extends Service {
                 }
                 break;
             case "cast-peer":
+                step("cast-peer " + m.optString("name"));
                 addPeer(m.getString("id"), m.optString("name", "TV"));
                 break;
             case "cast-peer-leave":
@@ -290,6 +306,7 @@ public class CastService extends Service {
             public void onCreateSuccess(SessionDescription sdp) {
                 run(() -> {
                     if (peers.get(id) != pc) return;
+                    step("offer dibuat untuk " + tvName);
                     pc.setLocalDescription(new SdpAdapter(), sdp);
                     sendSignal(id, obj("sdp", obj("type", "offer", "sdp", sdp.description)));
                 });
@@ -304,9 +321,10 @@ public class CastService extends Service {
         if (data.has("sdp")) {
             JSONObject sdp = data.getJSONObject("sdp");
             if (!"answer".equals(sdp.optString("type"))) return;
+            step("answer diterima dari " + peerNames.get(from));
             pc.setRemoteDescription(new SdpAdapter() {
                 @Override
-                public void onSetSuccess() { run(() -> limitBitrate(pc)); }
+                public void onSetSuccess() { step("answer dipasang, encoder mulai"); run(() -> limitBitrate(pc)); }
             }, new SessionDescription(SessionDescription.Type.ANSWER, sdp.getString("sdp")));
         } else if (data.has("candidate")) {
             JSONObject c = data.getJSONObject("candidate");
@@ -361,7 +379,10 @@ public class CastService extends Service {
         }
 
         @Override
-        public void onConnectionChange(PeerConnection.PeerConnectionState s) { run(CastService.this::updateStatus); }
+        public void onConnectionChange(PeerConnection.PeerConnectionState s) {
+            step("koneksi ke TV " + peerNames.get(id) + ": " + s);
+            run(CastService.this::updateStatus);
+        }
 
         @Override public void onSignalingChange(PeerConnection.SignalingState s) { }
         @Override public void onIceConnectionChange(PeerConnection.IceConnectionState s) { }
@@ -375,11 +396,11 @@ public class CastService extends Service {
         @Override public void onAddTrack(RtpReceiver receiver, MediaStream[] streams) { }
     }
 
-    private static class SdpAdapter implements SdpObserver {
+    private class SdpAdapter implements SdpObserver {
         @Override public void onCreateSuccess(SessionDescription sdp) { }
         @Override public void onSetSuccess() { }
-        @Override public void onCreateFailure(String error) { }
-        @Override public void onSetFailure(String error) { }
+        @Override public void onCreateFailure(String error) { step("SDP create gagal: " + error); }
+        @Override public void onSetFailure(String error) { step("SDP set gagal: " + error); }
     }
 
     // ---------- Helpers ----------
@@ -431,6 +452,7 @@ public class CastService extends Service {
     private void shutdown(boolean tellServer) {
         if (stopping && !running) return;
         stopping = true;
+        step("shutdown (status: " + status + ")");
         if (tellServer) send(obj("t", "cast-stop"));
         closePeers();
         if (ws != null) { ws.close(1000, null); ws = null; }
@@ -445,6 +467,7 @@ public class CastService extends Service {
         if (factory != null) { factory.dispose(); factory = null; }
         if (egl != null) { egl.release(); egl = null; }
         running = false;
+        CrashReporter.endSession(this);
         if (status.startsWith("Sedang") || status.startsWith("Menyambung") || status.startsWith("Menghubung")
                 || status.startsWith("Menyiapkan") || status.startsWith("Tidak ada")) {
             status = "Cast dihentikan.";
