@@ -65,6 +65,18 @@ class CastSender {
     }
   }
 
+  // Swap the picture (e.g. front/back camera) on every TV without reconnecting.
+  async replaceVideoTrack(track) {
+    for (const old of this.stream.getVideoTracks()) { this.stream.removeTrack(old); old.stop(); }
+    this.stream.addTrack(track);
+    track.contentHint = this.profile.hint;
+    // The receiver side of each transceiver always knows its media kind, even when the sender's track is gone.
+    await Promise.all([...this.peers.values()].flatMap((p) =>
+      p.pc.getTransceivers()
+        .filter((t) => t.receiver.track && t.receiver.track.kind === 'video')
+        .map((t) => t.sender.replaceTrack(track).catch(() => {}))));
+  }
+
   removePeer(id) {
     const peer = this.peers.get(id);
     if (!peer) return;
