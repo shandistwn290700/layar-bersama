@@ -1,6 +1,6 @@
 'use strict';
 // Layar Bersama controller for Windows: opens the server's control page in its own window.
-const { app, BrowserWindow, Menu, ipcMain, shell, dialog, clipboard } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, dialog, clipboard, session, desktopCapturer } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -33,7 +33,7 @@ function showSettings(error) {
 }
 
 function showControl() {
-  const { server } = readConfig();
+  const server = process.env.LAYAR_SERVER || readConfig().server; // env var is for testing against a local server
   if (!server) return showSettings();
   win.loadURL(server + '/');
 }
@@ -110,6 +110,43 @@ function createWindow() {
   showControl();
 }
 
+// ---------- Screen picker for "Cast layar" ----------
+// Electron has no built-in picker for getDisplayMedia, so the app shows its own window of screens and windows.
+let pickerResolve = null;
+let pickerSources = [];
+
+function pickSource() {
+  return new Promise(async (resolve) => {
+    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 } });
+    pickerSources = sources.filter((s) => !s.name.startsWith('Layar Bersama: Pilih'));
+    const picker = new BrowserWindow({
+      parent: win, modal: true, width: 760, height: 560, minimizable: false, maximizable: false,
+      title: 'Layar Bersama: Pilih yang akan di-cast', backgroundColor: '#151514', autoHideMenuBar: true,
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    });
+    pickerResolve = (id) => {
+      pickerResolve = null;
+      resolve(pickerSources.find((s) => s.id === id) || null);
+      if (!picker.isDestroyed()) picker.close();
+    };
+    picker.on('closed', () => pickerResolve && pickerResolve(null));
+    picker.loadFile(path.join(__dirname, 'picker.html'));
+  });
+}
+
+ipcMain.handle('picker-sources', () =>
+  pickerSources.map((s) => ({ id: s.id, name: s.name, screen: s.id.startsWith('screen:'), thumb: s.thumbnail.toDataURL() })));
+ipcMain.handle('picker-choose', (e, id) => { if (pickerResolve) pickerResolve(id); });
+
+function setupScreenCapture() {
+  session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+    const source = await pickSource();
+    if (!source) return callback({}); // cancelled: the page gets NotAllowedError
+    // Whole screens also send the computer's sound; single windows send picture only.
+    callback(source.id.startsWith('screen:') ? { video: source, audio: 'loopback' } : { video: source });
+  });
+}
+
 ipcMain.handle('save-server', (e, raw) => {
   const server = normalizeUrl(raw);
   if (!server) return { ok: false, error: 'Alamat server tidak valid. Contoh: https://layar.contoh.com' };
@@ -123,6 +160,6 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
-  app.whenReady().then(createWindow);
+  app.whenReady().then(() => { setupScreenCapture(); createWindow(); });
   app.on('window-all-closed', () => app.quit());
 }

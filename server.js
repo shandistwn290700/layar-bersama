@@ -29,6 +29,7 @@ try {
   Object.assign(state, JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')));
 } catch {}
 state.video = { playing: false, pos: 0, at: Date.now() };
+state.cast = null; // { id, from } while someone is casting live; never survives a restart
 
 let saveTimer;
 function save() {
@@ -142,6 +143,7 @@ app.post('/api/upload', requirePin, upload.array('files', 500), (req, res) => {
 app.use('/media', express.static(UPLOAD_DIR, { maxAge: '30d', immutable: true }));
 // Short address for typing into the Downloader app on a TV remote.
 app.get('/apk', (req, res) => res.redirect('/download/layar-bersama-tv.apk'));
+app.get('/cast', (req, res) => res.redirect('/download/layar-bersama-cast.apk'));
 app.get('/tv', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tv.html')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'control.html')));
 app.use(express.static(path.join(__dirname, 'public'))); // revalidated each load, so updates reach the TVs
@@ -162,7 +164,41 @@ function broadcastDisplays() {
   for (const ws of wss.clients) if (ws.role === 'control') send(ws, { t: 'displays', list });
 }
 
+// ---------- Live cast (WebRTC) ----------
+// The server only relays signaling: one sender (a control client) streams straight to every TV.
+const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+if (process.env.TURN_URL) {
+  ICE_SERVERS.push({ urls: process.env.TURN_URL, username: process.env.TURN_USERNAME, credential: process.env.TURN_CREDENTIAL });
+}
+let caster = null; // WebSocket of the client currently casting
+
+const displays = () => [...wss.clients].filter((c) => c.role === 'display' && c.readyState === WebSocket.OPEN);
+
+function startCast(ws, name) {
+  if (caster && caster !== ws) send(caster, { t: 'cast-ended', reason: 'replaced' });
+  caster = ws;
+  state.cast = { id: crypto.randomUUID().slice(0, 8), from: String(name || 'Kontrol').slice(0, 40) };
+  broadcastState();
+  for (const d of displays()) send(ws, { t: 'cast-peer', id: d.id, name: d.name });
+}
+
+function endCast() {
+  if (!caster && !state.cast) return;
+  caster = null;
+  state.cast = null;
+  broadcastState();
+}
+
+function relaySignal(ws, m) {
+  const to = [...wss.clients].find((c) => c.id === m.to);
+  if (!to) return;
+  // Only the caster may talk to TVs, and TVs may only answer the caster.
+  const allowed = (ws === caster && to.role === 'display') || (ws.role === 'display' && to === caster);
+  if (allowed) send(to, { t: 'signal', from: ws.id, data: m.data });
+}
+
 wss.on('connection', (ws) => {
+  ws.id = crypto.randomUUID().slice(0, 8);
   ws.alive = true;
   ws.on('pong', () => (ws.alive = true));
   ws.on('message', (raw) => {
@@ -172,16 +208,26 @@ wss.on('connection', (ws) => {
     if (m.t === 'hello') {
       ws.role = m.role === 'control' ? 'control' : 'display';
       ws.name = String(m.name || 'TV').slice(0, 40);
+      send(ws, { t: 'config', id: ws.id, iceServers: ICE_SERVERS });
       if (ws.role === 'control') {
         ws.authed = !PIN || m.pin === PIN;
         send(ws, { t: 'auth', ok: ws.authed, pinRequired: !!PIN });
       }
       send(ws, { t: 'state', state });
+      if (ws.role === 'display' && caster) send(caster, { t: 'cast-peer', id: ws.id, name: ws.name });
       return broadcastDisplays();
     }
-    if (m.t === 'cmd' && ws.role === 'control' && ws.authed) handleCmd(m);
+    if (m.t === 'signal') return relaySignal(ws, m);
+    if (ws.role !== 'control' || !ws.authed) return;
+    if (m.t === 'cmd') handleCmd(m);
+    else if (m.t === 'cast-start') startCast(ws, m.name);
+    else if (m.t === 'cast-stop' && ws === caster) endCast();
   });
-  ws.on('close', broadcastDisplays);
+  ws.on('close', () => {
+    if (ws === caster) endCast();
+    else if (ws.role === 'display' && caster) send(caster, { t: 'cast-peer-leave', id: ws.id });
+    broadcastDisplays();
+  });
 });
 
 setInterval(() => {

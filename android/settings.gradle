@@ -13,4 +13,5 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = 'LayarBersamaTV'
-include ':app'
+include ':app'   // Google TV display app
+include ':cast'  // phone app that casts its screen to the TVs

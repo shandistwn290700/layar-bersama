@@ -29,7 +29,11 @@
   .preview { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden;
     display: flex; align-items: center; justify-content: center; color: #888; }
   .preview img, .preview video { width: 100%; height: 100%; object-fit: contain; }
-  .preview .blanked { position: absolute; inset: 0; background: rgba(0,0,0,.82); color: #fff; display: none;
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .preview .live { position: absolute; inset: 0; background: #000; z-index: 1; }
+  select { font: inherit; padding: 8px 10px; min-height: 42px; border: 1px solid var(--line); border-radius: 7px;
+    background: var(--panel); color: var(--text); }
+  .preview .blanked { z-index: 2; position: absolute; inset: 0; background: rgba(0,0,0,.82); color: #fff; display: none;
     align-items: center; justify-content: center; font-weight: 600; }
   .preview.is-blank .blanked { display: flex; }
   .nav { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; margin-top: 12px; }
@@ -86,6 +90,7 @@
 </header>
 
 <main>
+  <div class="col">
   <section aria-labelledby="h-now">
     <h2 id="h-now">Sedang tampil</h2>
     <div class="preview" id="preview"><span>Belum ada konten</span><div class="blanked">Layar TV dihitamkan</div></div>
@@ -105,6 +110,22 @@
     </div>
     <p class="hint">Pintasan: <kbd>→</kbd>/<kbd>Spasi</kbd> berikutnya, <kbd>←</kbd> sebelumnya, <kbd>B</kbd> hitamkan. Clicker presentasi juga bisa dipakai.</p>
   </section>
+
+  <section aria-labelledby="h-cast">
+    <h2 id="h-cast">Cast langsung</h2>
+    <p class="hint" style="margin-top:0" id="castInfo">Tampilkan layar perangkat ini secara langsung di semua TV. Konten di atas tetap tersimpan dan muncul lagi setelah cast dihentikan.</p>
+    <div class="row">
+      <button class="primary" id="castBtn">Cast layar</button>
+      <label>Mode
+        <select id="castProfile">
+          <option value="sharp">Tajam (slide, dokumen)</option>
+          <option value="smooth">Lancar (video, animasi)</option>
+        </select>
+      </label>
+    </div>
+    <p class="hint" id="castStatus" role="status"></p>
+  </section>
+  </div>
 
   <section aria-labelledby="h-lib">
     <h2 id="h-lib">Konten</h2>
@@ -134,6 +155,7 @@
 </dialog>
 
 <script src="/sync.js"></script>
+<script src="/cast.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 let state = null, listKey = '', previewId = null, previewVideo = null, seeking = false;
@@ -149,11 +171,87 @@ const sock = connectSocket({
       const el = $('displays');
       el.textContent = m.list.length ? `${m.list.length} TV terhubung: ${m.list.join(', ')}` : 'Belum ada TV terhubung';
       el.classList.toggle('none', !m.list.length);
-    } else if (m.t === 'auth' && !m.ok) {
-      askPin(pin ? 'PIN salah, coba lagi.' : '');
+    } else if (m.t === 'auth') {
+      if (!m.ok) askPin(pin ? 'PIN salah, coba lagi.' : '');
+      else if (castSender) { castSender.resetPeers(); sock.send({ t: 'cast-start', name: CAST_NAME }); } // resume after reconnect
     }
+    else if (m.t === 'config') CastConfig.iceServers = m.iceServers;
+    else if (m.t === 'cast-peer') castSender && castSender.addPeer(m.id, m.name);
+    else if (m.t === 'cast-peer-leave') castSender && castSender.removePeer(m.id);
+    else if (m.t === 'signal') castSender && castSender.onSignal(m.from, m.data);
+    else if (m.t === 'cast-ended') { stopCast(false); castNote = 'Cast berhenti karena perangkat lain mulai cast.'; renderCastStatus(); }
   },
 });
+
+// ---------- Live cast ----------
+const CAST_NAME = /Electron/.test(navigator.userAgent) ? 'App Windows' : 'Laptop';
+const canCast = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+let castSender = null, castNote = '';
+
+// `stream` is optional: without it the browser asks which screen or window to share.
+async function startCast(stream) {
+  const profile = $('castProfile').value;
+  if (!stream) {
+    const p = CAST_PROFILES[profile];
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: p.frameRate, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: true,
+      });
+    } catch (err) {
+      castNote = err.name === 'NotAllowedError' ? 'Cast dibatalkan.' : 'Tidak bisa memulai cast: ' + err.message;
+      return renderCastStatus();
+    }
+  }
+  stopCast(false);
+  castNote = '';
+  castSender = new CastSender((msg) => sock.send(msg), stream, profile);
+  castSender.onchange = renderCastStatus;
+  // The browser's own "Stop sharing" button ends the cast too.
+  stream.getVideoTracks()[0]?.addEventListener('ended', () => stopCast());
+  sock.send({ t: 'cast-start', name: CAST_NAME });
+  renderCastStatus();
+}
+
+function stopCast(notify = true) {
+  if (!castSender) return;
+  castSender.stop();
+  castSender = null;
+  if (notify) sock.send({ t: 'cast-stop' });
+  renderCastStatus();
+}
+
+function renderCastStatus() {
+  const btn = $('castBtn');
+  btn.disabled = !canCast;
+  btn.textContent = castSender ? 'Hentikan cast' : 'Cast layar';
+  btn.classList.toggle('primary', !castSender);
+  $('castProfile').disabled = !!castSender;
+  let text = castNote;
+  if (!canCast) {
+    text = 'Browser ini tidak bisa cast layar. Pakai Chrome atau Edge di laptop, app Windows, atau app Android "Layar Bersama Cast".';
+  } else if (castSender) {
+    const names = castSender.connectedNames();
+    text = names.length ? `Sedang cast ke ${names.length} TV: ${names.join(', ')}.` : 'Menyambungkan ke TV…';
+  } else if (state && state.cast) {
+    text = `Sedang cast dari ${state.cast.from}. Menekan "Cast layar" akan mengambil alih.`;
+  }
+  $('castStatus').textContent = text;
+  // Show what is being cast in the preview box.
+  const pv = $('preview');
+  let live = pv.querySelector('.live');
+  if (castSender && !live) {
+    live = document.createElement('video');
+    live.className = 'live'; live.muted = true; live.autoplay = true; live.playsInline = true;
+    live.srcObject = castSender.stream;
+    pv.append(live);
+  } else if (!castSender && live) {
+    live.remove();
+  }
+}
+
+$('castBtn').onclick = () => (castSender ? stopCast() : startCast());
+renderCastStatus();
 
 // PIN dialog (window.prompt is not available in the desktop app).
 function askPin(error) {
@@ -185,7 +283,7 @@ function render() {
   if ((item && item.id) !== previewId) {
     previewId = item && item.id;
     const p = $('preview');
-    p.querySelectorAll('img, video, span').forEach((e) => e.remove());
+    p.querySelectorAll('img, video:not(.live), span').forEach((e) => e.remove());
     previewVideo = null;
     if (!item) {
       p.insertAdjacentHTML('afterbegin', '<span>Belum ada konten</span>');
@@ -201,6 +299,7 @@ function render() {
   $('vctl').classList.toggle('show', !!previewVideo);
   $('playpause').textContent = state.video.playing ? 'Jeda' : 'Putar';
   renderList();
+  renderCastStatus();
 }
 
 function renderList() {

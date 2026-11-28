@@ -11,7 +11,7 @@
   #stage > * { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
     opacity: 0; transition: opacity .35s; background: #000; }
   #stage > .on { opacity: 1; }
-  #blank { position: fixed; inset: 0; background: #000; display: none; z-index: 5; }
+  #blank { position: fixed; inset: 0; background: #000; display: none; z-index: 7; }
   #msg { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
     justify-content: center; gap: 1.5vh; text-align: center; z-index: 4; }
   #msgTitle { font-size: 3.2vw; color: #ddd; }
@@ -22,6 +22,11 @@
     font: inherit; font-size: 1.5vw; color: #fff; background: rgba(0, 0, 0, .8);
     border: 2px solid #666; padding: .6em 1.2em; border-radius: .5em; }
   #unlock:focus { border-color: #fff; outline: none; }
+  #cast { position: fixed; inset: 0; z-index: 6; background: #000; display: none; }
+  #cast.on { display: block; }
+  #castVideo { width: 100%; height: 100%; object-fit: contain; }
+  #castMsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 2.6vw; color: #bbb; text-align: center; }
 </style>
 </head>
 <body>
@@ -30,8 +35,10 @@
 <div id="msg"><div id="msgTitle">Menghubungkan…</div><div id="msgSub"></div></div>
 <div id="status">Koneksi ke server terputus, menyambung ulang…</div>
 <button id="unlock" type="button">Tekan OK untuk layar penuh &amp; suara</button>
+<div id="cast"><video id="castVideo" autoplay playsinline></video><div id="castMsg"></div></div>
 
 <script src="/sync.js"></script>
+<script src="/cast.js"></script>
 <script>
 const params = new URLSearchParams(location.search);
 const NAME = params.get('name') || 'TV';
@@ -103,19 +110,56 @@ function render() {
   preloadNext();
 }
 
-setInterval(() => { if (activeVideo && state) syncVideo(activeVideo, state); }, 250);
+setInterval(() => {
+  if (!activeVideo || !state) return;
+  syncVideo(activeVideo, state);
+  // A live cast takes over the sound; the playlist video keeps its place silently underneath.
+  if (state.cast) activeVideo.muted = true;
+  else if (soundOn) activeVideo.muted = false;
+}, 250);
 
-connectSocket({
+// ---------- Live cast ----------
+const castVideo = $('castVideo');
+let castId = null;
+const receiver = new CastReceiver((msg) => sock.send(msg), (stream) => {
+  castVideo.srcObject = stream;
+  castVideo.muted = !soundOn;
+  castVideo.play().catch(() => { castVideo.muted = true; castVideo.play().catch(() => {}); });
+  $('castMsg').textContent = '';
+});
+
+function renderCast() {
+  const c = state && state.cast;
+  $('cast').classList.toggle('on', !!c);
+  if (c && c.id !== castId) {
+    castId = c.id;
+    $('castMsg').textContent = 'Menyambungkan siaran dari ' + c.from + '…';
+  } else if (!c && castId) {
+    castId = null;
+    receiver.close();
+    castVideo.srcObject = null;
+  }
+}
+
+const sock = connectSocket({
   hello: () => ({ t: 'hello', role: 'display', name: NAME }),
-  onStatus: (ok) => { $('status').style.display = ok ? 'none' : 'block'; },
-  onMessage: (m) => { if (m.t === 'state') { state = m.state; render(); } },
+  onStatus: (ok) => {
+    $('status').style.display = ok ? 'none' : 'block';
+    if (!ok) { receiver.close(); castVideo.srcObject = null; castId = null; }
+  },
+  onMessage: (m) => {
+    if (m.t === 'state') { state = m.state; render(); renderCast(); }
+    else if (m.t === 'config') CastConfig.iceServers = m.iceServers;
+    else if (m.t === 'signal') receiver.onSignal(m.from, m.data);
+  },
 });
 
 // One button press is needed before the browser allows sound and fullscreen.
 const unlock = $('unlock');
 unlock.addEventListener('click', () => {
   soundOn = true;
-  if (activeVideo) activeVideo.muted = false;
+  if (activeVideo && !(state && state.cast)) activeVideo.muted = false;
+  castVideo.muted = false;
   const de = document.documentElement;
   (de.requestFullscreen || de.webkitRequestFullscreen || (() => {})).call(de)?.catch?.(() => {});
   unlock.style.display = 'none';

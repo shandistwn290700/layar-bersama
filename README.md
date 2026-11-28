@@ -61,6 +61,17 @@ Kode sumber ada di folder `android/`. Build: `cd android && gradlew assembleRele
 
 Kode sumber ada di folder `desktop/`. Build: `cd desktop && npm install && npm run dist`. Kalau build gagal dengan pesan NSIS *could not open file*, jalankan dari folder dengan jalur pendek (misalnya `C:\lb\desktop`).
 
+## Cast langsung
+
+Menampilkan layar laptop atau HP secara langsung di semua TV. Gambar dikirim lewat **WebRTC**, langsung dari perangkat ke setiap TV. Server hanya meneruskan "jabat tangan" koneksinya. Selama cast berjalan, daftar konten tetap tersimpan dan muncul lagi setelah cast dihentikan. Hanya satu perangkat yang bisa cast dalam satu waktu. Perangkat baru yang mulai cast akan mengambil alih.
+
+- **Laptop (app Windows, Chrome, atau Edge):** di halaman kontrol, pilih mode (*Tajam* untuk slide, *Lancar* untuk video), lalu **Cast layar**. App Windows menampilkan pemilih layar atau jendela. Seluruh layar ikut mengirim suara komputer.
+- **HP Android:** pasang app **Layar Bersama Cast** dari `https://domain-kamu/cast`. Isi alamat server, PIN, dan nama perangkat, lalu pilih **Mulai cast**. Suara HP tidak ikut terkirim. Browser di HP tidak mendukung cast layar, jadi app ini diperlukan.
+
+Cast paling lancar kalau pengirim dan TV ada di jaringan lokal yang sama. Kalau jaringannya berbeda dan cast tidak tersambung, tambahkan server TURN lewat variabel `TURN_URL`, `TURN_USERNAME`, dan `TURN_CREDENTIAL`.
+
+Kode app HP ada di `android/cast/`. Build: `cd android && gradlew :cast:assembleRelease`.
+
 ## Menyiapkan Google TV lewat browser (tanpa APK)
 
 Google TV tidak punya browser bawaan, jadi pasang satu dulu di **setiap TV**:

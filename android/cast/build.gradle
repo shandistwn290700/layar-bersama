@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Same release key as the TV app (android/keystore.properties, kept out of git).
+def keystoreProps = new Properties()
+def keystoreFile = rootProject.file('keystore.properties')
+if (keystoreFile.exists()) keystoreFile.withInputStream { keystoreProps.load(it) }
+
+android {
+    namespace 'id.layarbersama.cast'
+    compileSdk 37
+
+    defaultConfig {
+        applicationId 'id.layarbersama.cast'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' } // phones only; keeps the APK smaller
+    }
+
+    signingConfigs {
+        release {
+            if (keystoreFile.exists()) {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig keystoreFile.exists() ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
+
+dependencies {
+    implementation 'io.github.webrtc-sdk:android:125.6422.07'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+}
