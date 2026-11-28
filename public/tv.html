@@ -122,6 +122,7 @@ setInterval(() => {
 // ---------- Live cast ----------
 const castVideo = $('castVideo');
 let castId = null, castFrom = '';
+let pageBuild = null; // server version this page was loaded from
 const receiver = new CastReceiver((msg) => sock.send(msg), (stream) => {
   castVideo.srcObject = stream;
   castVideo.muted = !soundOn;
@@ -182,7 +183,12 @@ const sock = connectSocket({
   },
   onMessage: (m) => {
     if (m.t === 'state') { state = m.state; render(); renderCast(); }
-    else if (m.t === 'config') CastConfig.iceServers = m.iceServers;
+    else if (m.t === 'config') {
+      CastConfig.iceServers = m.iceServers;
+      // The server was updated since this page loaded: load the new version (TVs are rarely touched by hand).
+      if (pageBuild && m.build && m.build !== pageBuild) location.reload();
+      pageBuild = pageBuild || m.build;
+    }
     else if (m.t === 'signal') receiver.onSignal(m.from, m.data);
   },
 });

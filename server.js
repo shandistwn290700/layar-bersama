@@ -178,9 +178,14 @@ function redirectToApk(app) {
 }
 app.get(['/apk', '/download/layar-bersama-tv.apk'], redirectToApk('tv'));
 app.get(['/cast', '/download/layar-bersama-cast.apk'], redirectToApk('cast'));
-app.get('/tv', (req, res) => res.sendFile(path.join(__dirname, 'public', 'tv.html')));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'control.html')));
-app.use(express.static(path.join(__dirname, 'public'))); // revalidated each load, so updates reach the TVs
+// Pages and scripts must never be served stale after an update (Cloudflare would otherwise let browsers keep
+// them for 4 hours), so they are marked no-cache. Uploaded media and versioned APKs never change, so they may be cached.
+const noCache = (res) => res.setHeader('Cache-Control', 'no-cache');
+app.get('/tv', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'tv.html')); });
+app.get('/', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'control.html')); });
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, file) => { if (!file.includes(`${path.sep}download${path.sep}`)) noCache(res); },
+}));
 
 // ---------- WebSocket ----------
 const server = http.createServer(app);
@@ -205,6 +210,8 @@ if (process.env.TURN_URL) {
   ICE_SERVERS.push({ urls: process.env.TURN_URL, username: process.env.TURN_USERNAME, credential: process.env.TURN_CREDENTIAL });
 }
 let caster = null; // WebSocket of the client currently casting
+// Changes on every server start; TVs reload their page when it changes, so a deploy reaches them unattended.
+const BUILD_ID = Date.now().toString(36);
 
 const displays = () => [...wss.clients].filter((c) => c.role === 'display' && c.readyState === WebSocket.OPEN);
 
@@ -250,7 +257,7 @@ wss.on('connection', (ws) => {
     if (m.t === 'hello') {
       ws.role = m.role === 'control' ? 'control' : 'display';
       ws.name = String(m.name || 'TV').slice(0, 40);
-      send(ws, { t: 'config', id: ws.id, iceServers: ICE_SERVERS });
+      send(ws, { t: 'config', id: ws.id, iceServers: ICE_SERVERS, build: BUILD_ID });
       if (ws.role === 'control') {
         ws.authed = !PIN || m.pin === PIN;
         send(ws, { t: 'auth', ok: ws.authed, pinRequired: !!PIN });
