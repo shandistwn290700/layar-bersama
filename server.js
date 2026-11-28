@@ -231,6 +231,14 @@ function relaySignal(ws, m) {
   if (allowed) send(to, { t: 'signal', from: ws.id, data: m.data });
 }
 
+// How each TV is receiving the live cast (sent by the TV page every few seconds while casting).
+app.get('/api/cast-stats', requirePin, (req, res) => {
+  res.json({
+    cast: state.cast,
+    tvs: displays().map((d) => ({ name: d.name, stats: d.castStats || null })),
+  });
+});
+
 wss.on('connection', (ws) => {
   ws.id = crypto.randomUUID().slice(0, 8);
   ws.alive = true;
@@ -252,6 +260,10 @@ wss.on('connection', (ws) => {
       return broadcastDisplays();
     }
     if (m.t === 'signal') return relaySignal(ws, m);
+    if (m.t === 'cast-stats' && ws.role === 'display') {
+      ws.castStats = { at: new Date().toISOString(), ...(m.stats || {}) };
+      return;
+    }
     if (ws.role !== 'control' || !ws.authed) return;
     if (m.t === 'cmd') handleCmd(m);
     else if (m.t === 'cast-start') startCast(ws, m.name);

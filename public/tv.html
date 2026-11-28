@@ -35,7 +35,8 @@
 <div id="msg"><div id="msgTitle">Menghubungkan…</div><div id="msgSub"></div></div>
 <div id="status">Koneksi ke server terputus, menyambung ulang…</div>
 <button id="unlock" type="button">Tekan OK untuk layar penuh &amp; suara</button>
-<div id="cast"><video id="castVideo" autoplay playsinline></video><div id="castMsg"></div></div>
+<!-- An empty poster hides Android WebView's big grey "play" icon while no frame has arrived yet. -->
+<div id="cast"><video id="castVideo" autoplay playsinline poster="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></video><div id="castMsg"></div></div>
 
 <script src="/sync.js"></script>
 <script src="/cast.js"></script>
@@ -120,19 +121,23 @@ setInterval(() => {
 
 // ---------- Live cast ----------
 const castVideo = $('castVideo');
-let castId = null;
+let castId = null, castFrom = '';
 const receiver = new CastReceiver((msg) => sock.send(msg), (stream) => {
   castVideo.srcObject = stream;
   castVideo.muted = !soundOn;
   castVideo.play().catch(() => { castVideo.muted = true; castVideo.play().catch(() => {}); });
-  $('castMsg').textContent = '';
+  // The track arrives before any picture does; keep the message up until a frame is actually shown.
+  $('castMsg').textContent = 'Menunggu gambar dari ' + castFrom + '…';
 });
+castVideo.addEventListener('resize', () => { if (castVideo.videoWidth) $('castMsg').textContent = ''; });
+castVideo.addEventListener('playing', () => { if (castVideo.videoWidth) $('castMsg').textContent = ''; });
 
 function renderCast() {
   const c = state && state.cast;
   $('cast').classList.toggle('on', !!c);
   if (c && c.id !== castId) {
     castId = c.id;
+    castFrom = c.from;
     $('castMsg').textContent = 'Menyambungkan siaran dari ' + c.from + '…';
   } else if (!c && castId) {
     castId = null;
@@ -140,6 +145,34 @@ function renderCast() {
     castVideo.srcObject = null;
   }
 }
+
+// While a cast is on, tell the server how reception is going, so problems can be seen from the control side.
+setInterval(async () => {
+  if (!castId) return;
+  const s = { pc: 'none', ice: '', framesReceived: 0, framesDecoded: 0, fps: 0, codec: '', size: '', route: '',
+    video: castVideo.videoWidth + 'x' + castVideo.videoHeight, paused: castVideo.paused, ready: castVideo.readyState,
+    msg: $('castMsg').textContent, ua: navigator.userAgent.slice(0, 120) };
+  const pc = receiver.pc;
+  if (pc) {
+    s.pc = pc.connectionState; s.ice = pc.iceConnectionState;
+    try {
+      const stats = await pc.getStats();
+      stats.forEach((r) => {
+        if (r.type === 'inbound-rtp' && r.kind === 'video') {
+          s.framesReceived = r.framesReceived || 0; s.framesDecoded = r.framesDecoded || 0; s.fps = r.framesPerSecond || 0;
+          s.size = (r.frameWidth || 0) + 'x' + (r.frameHeight || 0);
+          const c = r.codecId && stats.get(r.codecId); if (c) s.codec = c.mimeType;
+          s.decoder = r.decoderImplementation || '';
+        }
+        if (r.type === 'candidate-pair' && r.state === 'succeeded' && r.nominated) {
+          const l = stats.get(r.localCandidateId), rm = stats.get(r.remoteCandidateId);
+          if (l && rm) s.route = l.candidateType + '->' + rm.candidateType;
+        }
+      });
+    } catch {}
+  }
+  sock.send({ t: 'cast-stats', stats: s });
+}, 3000);
 
 const sock = connectSocket({
   hello: () => ({ t: 'hello', role: 'display', name: NAME }),
