@@ -29,6 +29,8 @@
   .preview { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden;
     display: flex; align-items: center; justify-content: center; color: #888; }
   .preview img, .preview video { width: 100%; height: 100%; object-fit: contain; }
+  a.btn { text-decoration: none; }
+  [hidden] { display: none !important; }
   .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
   .preview .live { position: absolute; inset: 0; background: #000; z-index: 1; }
   select { font: inherit; padding: 8px 10px; min-height: 42px; border: 1px solid var(--line); border-radius: 7px;
@@ -114,7 +116,10 @@
   <section aria-labelledby="h-cast">
     <h2 id="h-cast">Cast langsung</h2>
     <p class="hint" style="margin-top:0" id="castInfo">Tampilkan layar perangkat ini secara langsung di semua TV. Konten di atas tetap tersimpan dan muncul lagi setelah cast dihentikan.</p>
-    <div class="row">
+    <div class="row" id="castPhone" hidden>
+      <a class="btn primary" href="/cast" id="castAppLink">Unduh app Layar Bersama Cast</a>
+    </div>
+    <div class="row" id="castDesk">
       <button class="primary" id="castBtn">Cast layar</button>
       <label>Mode
         <select id="castProfile">
@@ -185,7 +190,16 @@ const sock = connectSocket({
 
 // ---------- Live cast ----------
 const CAST_NAME = /Electron/.test(navigator.userAgent) ? 'App Windows' : 'Laptop';
-const canCast = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+// Phone browsers cannot capture the screen; Android phones use the Layar Bersama Cast app instead.
+const IS_ANDROID = /Android/i.test(navigator.userAgent) && !/Electron/.test(navigator.userAgent);
+const IS_IOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+const canCast = !IS_ANDROID && !IS_IOS && !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+if (IS_ANDROID) {
+  $('castPhone').hidden = false;
+  $('castDesk').hidden = true;
+  $('castInfo').textContent = 'Di HP Android, cast layar memakai app "Layar Bersama Cast". Unduh dan pasang app-nya, '
+    + 'lalu buka app itu, isi alamat server ' + location.origin + ' dan PIN, kemudian pilih "Mulai cast".';
+}
 let castSender = null, castNote = '';
 
 // `stream` is optional: without it the browser asks which screen or window to share.
@@ -228,8 +242,12 @@ function renderCastStatus() {
   btn.classList.toggle('primary', !castSender);
   $('castProfile').disabled = !!castSender;
   let text = castNote;
-  if (!canCast) {
-    text = 'Browser ini tidak bisa cast layar. Pakai Chrome atau Edge di laptop, app Windows, atau app Android "Layar Bersama Cast".';
+  if (IS_ANDROID) {
+    text = state && state.cast ? `Sedang cast dari ${state.cast.from}.` : '';
+  } else if (!canCast) {
+    text = IS_IOS
+      ? 'iPhone dan iPad belum didukung untuk cast layar. Pakai laptop (app Windows, Chrome, atau Edge) atau HP Android.'
+      : 'Browser ini tidak bisa cast layar. Pakai Chrome atau Edge di laptop, atau app Windows.';
   } else if (castSender) {
     const names = castSender.connectedNames();
     text = names.length ? `Sedang cast ke ${names.length} TV: ${names.join(', ')}.` : 'Menyambungkan ke TV…';
