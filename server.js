@@ -181,8 +181,19 @@ app.get(['/cast', '/download/layar-bersama-cast.apk'], redirectToApk('cast'));
 // Pages and scripts must never be served stale after an update (Cloudflare would otherwise let browsers keep
 // them for 4 hours), so they are marked no-cache. Uploaded media and versioned APKs never change, so they may be cached.
 const noCache = (res) => res.setHeader('Cache-Control', 'no-cache');
-app.get('/tv', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'tv.html')); });
-app.get('/', (req, res) => { noCache(res); res.sendFile(path.join(__dirname, 'public', 'control.html')); });
+// Cloudflare still forces a 4-hour browser cache on .js files, so the pages ask for /sync.js?v=<build>:
+// every deploy gets new script URLs that no browser or TV can have cached.
+function sendPage(file) {
+  return (req, res) => {
+    fs.readFile(path.join(__dirname, 'public', file), 'utf8', (err, html) => {
+      if (err) return res.sendStatus(500);
+      noCache(res);
+      res.type('html').send(html.replace(/src="\/(\w+)\.js"/g, `src="/$1.js?v=${BUILD_ID}"`));
+    });
+  };
+}
+app.get('/tv', sendPage('tv.html'));
+app.get('/', sendPage('control.html'));
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, file) => { if (!file.includes(`${path.sep}download${path.sep}`)) noCache(res); },
 }));
